@@ -103,7 +103,11 @@ const defaultConfig = {
 	content_interaction: false,
 	profile: "",
 	profile_entity: "",
-	profiles: {}
+	profiles: {},
+	// Error handling for media_index integration
+	handle_image_errors: false, // Call media_index.mark_file_error on load failures
+	auto_exclude_errors: true, // Auto-move files after error_threshold failures
+	error_threshold: 2 // Number of errors before moving file to _Errors folder
 };
 const renamedConfigOptions = {
 	image_excludes: "exclude_filenames",
@@ -3205,9 +3209,39 @@ function initWallpanel() {
 				// Make sure the "Keep WiFi on during sleep" option is enabled.
 				// Set your WiFi connection to "not metered".
 				logger.error(`Failed to update media from ${element.mediaUrl}:`, error);
+
+				// Report error to media_index if configured
+				if (config.handle_image_errors && element.mediaUrl) {
+					this.reportMediaError(element.mediaUrl, error);
+				}
 			}
 			this.updatingMedia = false;
 			return element;
+		}
+
+		async reportMediaError(mediaUrl, error) {
+			// Extract file path from media-source URL if applicable
+			// Format: media-source://media_source/local/path/to/file.jpg
+			let filePath = mediaUrl;
+			const mediaSourceMatch = mediaUrl.match(/^media-source:\/\/media_source\/local\/(.+)/);
+			if (mediaSourceMatch) {
+				filePath = "/media/" + mediaSourceMatch[1];
+			}
+
+			const errorType = error?.message?.includes("decode") ? "decode_error" : "load_failed";
+
+			try {
+				logger.info(`Reporting media error to media_index: ${filePath} (${errorType})`);
+				await this.hass.callService("media_index", "mark_file_error", {
+					file_path: filePath,
+					error_type: errorType,
+					auto_move: config.auto_exclude_errors,
+					error_threshold: config.error_threshold
+				});
+			} catch (serviceError) {
+				// Don't fail silently but don't break the screensaver either
+				logger.warn(`Failed to report media error to media_index:`, serviceError);
+			}
 		}
 
 		setMediaDimensions() {
