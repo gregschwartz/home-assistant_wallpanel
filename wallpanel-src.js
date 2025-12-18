@@ -3632,6 +3632,44 @@ function initWallpanel() {
 			return Boolean(this.screensaverStartedAt) && this.screensaverStartedAt > 0;
 		}
 
+		/**
+		 * Skip to next image. Can be called via browser_mod.javascript service.
+		 * @param {Object} filter - Optional filter to match specific instances
+		 * @param {string} filter.path - Match instances on this path (e.g., "/lovelace/0")
+		 * @param {string} filter.profile - Match instances with this active profile
+		 * @param {string} filter.browser_id - Match instances with this browser_mod ID
+		 * @returns {boolean} - True if skip was triggered, false if filtered out
+		 */
+		skipToNext(filter = null) {
+			if (!this.screensaverRunning()) {
+				logger.debug("skipToNext: screensaver not running");
+				return false;
+			}
+
+			if (filter) {
+				const currentPath = window.location.pathname;
+				const currentProfile = this.lastProfileSet || config.profile || "";
+				const currentBrowserId = browserId || "";
+
+				if (filter.path && filter.path !== currentPath) {
+					logger.debug(`skipToNext: path mismatch (${filter.path} != ${currentPath})`);
+					return false;
+				}
+				if (filter.profile && filter.profile !== currentProfile) {
+					logger.debug(`skipToNext: profile mismatch (${filter.profile} != ${currentProfile})`);
+					return false;
+				}
+				if (filter.browser_id && filter.browser_id !== currentBrowserId) {
+					logger.debug(`skipToNext: browser_id mismatch (${filter.browser_id} != ${currentBrowserId})`);
+					return false;
+				}
+			}
+
+			logger.info("skipToNext: triggered via JS");
+			this.switchActiveMedia("skip_js");
+			return true;
+		}
+
 		stopScreensaver(fadeOutTime = 0.0) {
 			logger.debug("Stop screensaver");
 
