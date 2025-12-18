@@ -103,6 +103,7 @@ const defaultConfig = {
 	content_interaction: false,
 	profile: "",
 	profile_entity: "",
+	skip_next_entity: "", // Entity (input_datetime/input_text) to trigger skip to next image when changed
 	profiles: {},
 	// Error handling for media_index integration
 	handle_image_errors: false, // Call media_index.mark_file_error on load failures
@@ -1131,6 +1132,19 @@ function initWallpanel() {
 					lastChanged.getTime() - this.screensaverStoppedAt > 0
 				) {
 					this.startScreensaver();
+				}
+			}
+
+			// Handle skip_next_entity - skip to next image when entity changes
+			const skip_next_entity = config.skip_next_entity;
+			if (skip_next_entity && this.__hass.states[skip_next_entity] && this.screensaverRunning()) {
+				const entityLastChanged = new Date(this.__hass.states[skip_next_entity].last_changed).getTime();
+				if (!this.lastSkipEntityChange) {
+					this.lastSkipEntityChange = entityLastChanged;
+				} else if (entityLastChanged > this.lastSkipEntityChange) {
+					this.lastSkipEntityChange = entityLastChanged;
+					logger.info("Skip triggered by entity change:", skip_next_entity);
+					this.switchActiveMedia("skip_entity");
 				}
 			}
 
