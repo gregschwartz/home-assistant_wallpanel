@@ -3,7 +3,7 @@
  * Released under the GNU General Public License v3.0
  */
 
-const version = "4.65.1";
+const version = "4.65.1-greg.1";
 const defaultConfig = {
 	enabled: false,
 	enabled_on_views: [],
@@ -114,7 +114,13 @@ const defaultConfig = {
 	content_interaction: false,
 	profile: "",
 	profile_entity: "",
-	profiles: {}
+	skip_next_entity: "", // Entity (input_datetime/input_text) to trigger skip to next image when changed
+	profiles: {},
+	// Error handling for media_index integration
+	handle_image_errors: false, // Call media_index.mark_file_error on load failures
+	auto_exclude_errors: true, // Auto-move files after error_threshold failures
+	error_threshold: 2, // Number of errors before media_index moves the file to its errors folder
+	skip_on_error: true // Immediately advance to the next image when media fails to load
 };
 const renamedConfigOptions = {
 	image_excludes: "exclude_filenames",
@@ -1392,6 +1398,19 @@ function initWallpanel() {
 					lastChanged.getTime() - this.screensaverStoppedAt > 0
 				) {
 					this.startScreensaver();
+				}
+			}
+
+			// Handle skip_next_entity - skip to next image when the entity changes
+			const skip_next_entity = config.skip_next_entity;
+			if (skip_next_entity && this.__hass.states[skip_next_entity] && this.screensaverRunning()) {
+				const entityLastChanged = new Date(this.__hass.states[skip_next_entity].last_changed).getTime();
+				if (!this.lastSkipEntityChange) {
+					this.lastSkipEntityChange = entityLastChanged;
+				} else if (entityLastChanged > this.lastSkipEntityChange) {
+					this.lastSkipEntityChange = entityLastChanged;
+					logger.info("Skip triggered by entity change:", skip_next_entity);
+					this.switchActiveMedia("skip_entity");
 				}
 			}
 
@@ -3637,6 +3656,10 @@ function initWallpanel() {
 					return;
 				}
 				element.infoCacheUrl = element.mediaUrl;
+				// Keep the original (unresolved) URL for error reporting -
+				// updateMediaFromMediaSource rewrites element.mediaUrl to the resolved http URL
+				element.originalMediaUrl = element.mediaUrl;
+				element.mediaLoadFailed = false;
 
 				if (mediaSourceType() == "media-source") {
 					element = await this.updateMediaFromMediaSource(element);
@@ -3698,10 +3721,46 @@ function initWallpanel() {
 				// Make sure the "Keep WiFi on during sleep" option is enabled.
 				// Set your WiFi connection to "not metered".
 				logger.error(`Failed to update media from ${element.mediaUrl}:`, error);
+				element.mediaLoadFailed = true;
+
+				// Report error to media_index if configured
+				if (config.handle_image_errors && element.originalMediaUrl) {
+					this.reportMediaError(element.originalMediaUrl, error);
+				}
 			} finally {
 				this.updatingMedia = false;
 			}
 			return element;
+		}
+
+		async reportMediaError(mediaUrl, error) {
+			const errorType = error?.message?.toLowerCase().includes("decode") ? "decode_error" : "load_failed";
+			const data = {
+				error_type: errorType,
+				auto_move: config.auto_exclude_errors,
+				error_threshold: config.error_threshold
+			};
+
+			if (mediaUrl.startsWith("media-source://")) {
+				// media_index converts the URI to a filesystem path server-side
+				data.media_source_uri = mediaUrl;
+			} else {
+				// Direct URL to a local media file, e.g. http://ha:8123/media/local/photos/x.jpg?authSig=...
+				const match = mediaUrl.match(/\/media\/local\/([^?]+)/);
+				if (!match) {
+					logger.debug(`Not reporting media error for non-local media: ${mediaUrl}`);
+					return;
+				}
+				data.file_path = "/media/" + decodeURIComponent(match[1]);
+			}
+
+			try {
+				logger.info(`Reporting media error to media_index (${errorType}):`, data);
+				await this.hass.callService("media_index", "mark_file_error", data);
+			} catch (serviceError) {
+				// Don't fail silently but don't break the screensaver either
+				logger.warn("Failed to report media error to media_index:", serviceError);
+			}
 		}
 
 		setMediaDimensions() {
@@ -3910,6 +3969,21 @@ function initWallpanel() {
 			if (!element) {
 				return;
 			}
+			if (element.mediaLoadFailed) {
+				element.mediaLoadFailed = false;
+				this.consecutiveMediaErrors = (this.consecutiveMediaErrors || 0) + 1;
+				const maxErrorSkips = Math.min(this.mediaList.length || 10, 10);
+				if (config.skip_on_error && this.screensaverRunning() && this.consecutiveMediaErrors <= maxErrorSkips) {
+					logger.warn(
+						`Media failed to load, skipping to next (attempt ${this.consecutiveMediaErrors}/${maxErrorSkips})`
+					);
+					setTimeout(() => this.switchActiveMedia("error_skip"), 100);
+				} else if (this.consecutiveMediaErrors > maxErrorSkips) {
+					logger.error("Too many consecutive media load failures, not skipping further");
+				}
+				return;
+			}
+			this.consecutiveMediaErrors = 0;
 			this._switchActiveMedia(element, crossfadeMillis);
 		}
 
@@ -4109,6 +4183,44 @@ function initWallpanel() {
 		}
 
 		// API for use with Browser Mod.
+		/**
+		 * Skip to next image. Can be called via browser_mod.javascript service.
+		 * @param {Object} filter - Optional filter to match specific instances
+		 * @param {string} filter.path - Match instances on this path (e.g., "/lovelace/0")
+		 * @param {string} filter.profile - Match instances with this active profile
+		 * @param {string} filter.browser_id - Match instances with this browser_mod ID
+		 * @returns {boolean} - True if skip was triggered, false if filtered out
+		 */
+		skipToNext(filter = null) {
+			if (!this.screensaverRunning()) {
+				logger.debug("skipToNext: screensaver not running");
+				return false;
+			}
+
+			if (filter) {
+				const currentPath = window.location.pathname;
+				const currentProfile = this.lastProfileSet || config.profile || "";
+				const currentBrowserId = browserId || "";
+
+				if (filter.path && filter.path !== currentPath) {
+					logger.debug(`skipToNext: path mismatch (${filter.path} != ${currentPath})`);
+					return false;
+				}
+				if (filter.profile && filter.profile !== currentProfile) {
+					logger.debug(`skipToNext: profile mismatch (${filter.profile} != ${currentProfile})`);
+					return false;
+				}
+				if (filter.browser_id && filter.browser_id !== currentBrowserId) {
+					logger.debug(`skipToNext: browser_id mismatch (${filter.browser_id} != ${currentBrowserId})`);
+					return false;
+				}
+			}
+
+			logger.info("skipToNext: triggered via JS");
+			this.switchActiveMedia("skip_js");
+			return true;
+		}
+
 		stopScreensaver(fadeOutTime = 0.0) {
 			logger.debug("Stop screensaver");
 
