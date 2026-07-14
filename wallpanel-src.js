@@ -1462,8 +1462,10 @@ function initWallpanel() {
 			if (!image_url_entity || !this.__hass.states[image_url_entity]) return;
 			const activeElement = this.getActiveMediaElement();
 			if (!activeElement || !activeElement.mediaUrl) return;
+			// Prefer the original media-source:// URI over the resolved http URL -
+			// it is stable (no auth signature) and usable with media_index services
 			// Maximum length for input_text entity is 255
-			const mediaUrl = activeElement.mediaUrl.substring(0, 255);
+			const mediaUrl = (activeElement.originalMediaUrl || activeElement.mediaUrl).substring(0, 255);
 			if (this.lastImageUrlEntityValue === mediaUrl) {
 				return;
 			}
