@@ -121,10 +121,8 @@ const defaultConfig = {
 	auto_exclude_errors: true, // Auto-move files after error_threshold failures
 	error_threshold: 2, // Number of errors before media_index moves the file to its errors folder
 	// No-repeat tracking: remember shown media (hashed, in localStorage) and only
-	// show unseen media until no_repeat_reset_percent of the library has been shown
-	no_repeat: false,
-	no_repeat_reset_percent: 100, // Reset the seen-list after this much of the library has been shown
-	no_repeat_refill_threshold: 10 // Refresh the media list (in the background) when fewer unshown items remain
+	// show unseen media; starts over once the entire library has been shown
+	no_repeat: false
 };
 const renamedConfigOptions = {
 	image_excludes: "exclude_filenames",
@@ -2885,11 +2883,8 @@ function initWallpanel() {
 			}
 			let unseen = urls.filter((u) => !this.seenMediaHashes.has(hashString53(u)));
 			const seenCount = urls.length - unseen.length;
-			const seenPercent = urls.length ? (seenCount / urls.length) * 100 : 0;
-			if (!unseen.length || seenPercent >= config.no_repeat_reset_percent) {
-				logger.info(
-					`no_repeat: ${seenCount} of ${urls.length} media shown (${Math.round(seenPercent)}%) - starting over`
-				);
+			if (!unseen.length) {
+				logger.info(`no_repeat: all ${urls.length} media shown - starting over`);
 				this.resetSeenMedia();
 				unseen = urls;
 			} else {
@@ -3579,7 +3574,7 @@ function initWallpanel() {
 					// The rebuilt list contains only unseen media (filterUnseenMedia).
 					const remaining = this.mediaList.length - 1 - mediaIndex;
 					const throttled = Date.now() - this.lastMediaListUpdate < 30000;
-					if (remaining < config.no_repeat_refill_threshold && !throttled) {
+					if (remaining < 10 && !throttled) {
 						logger.debug(`no_repeat: ${remaining} unshown items remaining, refreshing media list`);
 						this.updateMediaList(null, true);
 					}
