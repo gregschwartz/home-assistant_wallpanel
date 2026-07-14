@@ -123,7 +123,8 @@ const defaultConfig = {
 	// No-repeat tracking: remember shown media (hashed, in localStorage) and only
 	// show unseen media until no_repeat_reset_percent of the library has been shown
 	no_repeat: false,
-	no_repeat_reset_percent: 90
+	no_repeat_reset_percent: 100, // Reset the seen-list after this much of the library has been shown
+	no_repeat_refill_threshold: 10 // Refresh the media list (in the background) when fewer unshown items remain
 };
 const renamedConfigOptions = {
 	image_excludes: "exclude_filenames",
@@ -3567,16 +3568,22 @@ function initWallpanel() {
 			}
 			if (mediaIndex >= this.mediaList.length) {
 				mediaIndex = 0;
-				if (config.no_repeat && updateIndex) {
-					// Current pool exhausted - refresh the list so the next cycle
-					// only contains media that has not been shown yet
-					this.updateMediaList(null, true);
-				}
 			} else if (mediaIndex < 0) {
 				mediaIndex = this.mediaList.length - 1;
 			}
 			if (updateIndex) {
 				this.mediaIndex = mediaIndex;
+				if (config.no_repeat && this.mediaListDirection == "forwards") {
+					// Low-water mark: refresh the list in the background before the
+					// unshown pool runs dry, so selection never has to wait.
+					// The rebuilt list contains only unseen media (filterUnseenMedia).
+					const remaining = this.mediaList.length - 1 - mediaIndex;
+					const throttled = Date.now() - this.lastMediaListUpdate < 30000;
+					if (remaining < config.no_repeat_refill_threshold && !throttled) {
+						logger.debug(`no_repeat: ${remaining} unshown items remaining, refreshing media list`);
+						this.updateMediaList(null, true);
+					}
+				}
 			}
 			return this.mediaList[mediaIndex];
 		}

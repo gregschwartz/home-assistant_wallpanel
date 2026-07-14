@@ -72,7 +72,8 @@ You can set the following configuration parameters for every individual Home Ass
 | media_list_max_size              | The maximum number of media items to fetch from the media source.                                      | 500        |
 | media_order                      | The order in which the images are displayed (possible values are: sorted / random).                    | random     |
 | no_repeat                        | Track shown media (hashed, in browser localStorage) and only show unseen media until no_repeat_reset_percent of the library has been shown, then start over. Media-source only. | false      |
-| no_repeat_reset_percent          | Percentage of the library after which the no_repeat seen-list is reset.                                | 90         |
+| no_repeat_reset_percent          | Percentage of the library after which the no_repeat seen-list is reset.                                | 100        |
+| no_repeat_refill_threshold       | Refresh the media list in the background when fewer than this many unshown items remain.               | 10         |
 | skip_next_entity                 | An entity (e.g. input_datetime / input_text). Whenever its state changes, wallpanel skips to the next image. | ""     |
 | handle_image_errors              | Report media load failures to the media_index integration (media_index.mark_file_error).               | false      |
 | auto_exclude_errors              | Ask media_index to move files to its errors folder after error_threshold failures.                     | true       |
