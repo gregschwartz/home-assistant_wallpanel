@@ -3,7 +3,7 @@
  * Released under the GNU General Public License v3.0
  */
 
-const version = "4.65.1-greg.2";
+const version = "4.65.1-greg.3";
 const defaultConfig = {
 	enabled: false,
 	enabled_on_views: [],
@@ -799,6 +799,29 @@ function shuffleArray(array) {
 	const result = array.slice(); // Make a copy to avoid mutating the original
 	for (let i = result.length - 1; i > 0; i--) {
 		const j = Math.floor(Math.random() * (i + 1));
+		[result[i], result[j]] = [result[j], result[i]];
+	}
+	return result;
+}
+
+// mulberry32: tiny seeded PRNG - same seed always produces the same sequence
+function mulberry32(seed) {
+	let a = seed | 0;
+	return function () {
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+// Deterministic shuffle: identical (array, seed) always yields the same order,
+// so a persisted index stays valid across page reloads and HA restarts
+function seededShuffleArray(array, seed) {
+	const rand = mulberry32(seed);
+	const result = array.slice();
+	for (let i = result.length - 1; i > 0; i--) {
+		const j = Math.floor(rand() * (i + 1));
 		[result[i], result[j]] = [result[j], result[i]];
 	}
 	return result;
@@ -2828,69 +2851,41 @@ function initWallpanel() {
 			});
 		}
 
-		seenMediaStorageKey() {
+		noRepeatStorageKey() {
 			// Keyed by media source so different dashboards/sources track independently
-			return `wallpanel_seen_media_${hashString53(String(config.image_url))}`;
+			return `wallpanel_no_repeat_${hashString53(String(config.image_url))}`;
 		}
 
-		loadSeenMedia() {
-			this.seenMediaHashes = new Set();
-			try {
-				const raw = localStorage.getItem(this.seenMediaStorageKey());
-				if (raw) {
-					for (const h of JSON.parse(raw)) {
-						this.seenMediaHashes.add(h);
+		getNoRepeatState() {
+			// {seed, index}: the media list is deterministically shuffled with seed,
+			// index is the position of the last shown media. Together they encode
+			// full slideshow progress in two numbers, surviving reloads and restarts.
+			if (!this.noRepeatState) {
+				try {
+					const raw = localStorage.getItem(this.noRepeatStorageKey());
+					if (raw) {
+						const parsed = JSON.parse(raw);
+						if (Number.isInteger(parsed.seed) && Number.isInteger(parsed.index)) {
+							this.noRepeatState = parsed;
+						}
 					}
+				} catch (e) {
+					logger.warn("Failed to load no_repeat state:", e);
 				}
-			} catch (e) {
-				logger.warn("Failed to load seen media list:", e);
 			}
+			if (!this.noRepeatState) {
+				this.noRepeatState = { seed: Math.floor(Math.random() * 4294967296), index: -1 };
+				this.saveNoRepeatState();
+			}
+			return this.noRepeatState;
 		}
 
-		saveSeenMedia() {
+		saveNoRepeatState() {
 			try {
-				localStorage.setItem(this.seenMediaStorageKey(), JSON.stringify([...this.seenMediaHashes]));
+				localStorage.setItem(this.noRepeatStorageKey(), JSON.stringify(this.noRepeatState));
 			} catch (e) {
-				logger.warn("Failed to save seen media list:", e);
+				logger.warn("Failed to save no_repeat state:", e);
 			}
-		}
-
-		resetSeenMedia() {
-			this.seenMediaHashes = new Set();
-			this.saveSeenMedia();
-		}
-
-		markMediaSeen(url) {
-			if (!config.no_repeat || !url) {
-				return;
-			}
-			if (!this.seenMediaHashes) {
-				this.loadSeenMedia();
-			}
-			const h = hashString53(url);
-			if (!this.seenMediaHashes.has(h)) {
-				this.seenMediaHashes.add(h);
-				this.saveSeenMedia();
-			}
-		}
-
-		filterUnseenMedia(urls) {
-			if (!config.no_repeat) {
-				return urls;
-			}
-			if (!this.seenMediaHashes) {
-				this.loadSeenMedia();
-			}
-			let unseen = urls.filter((u) => !this.seenMediaHashes.has(hashString53(u)));
-			const seenCount = urls.length - unseen.length;
-			if (!unseen.length) {
-				logger.info(`no_repeat: all ${urls.length} media shown - starting over`);
-				this.resetSeenMedia();
-				unseen = urls;
-			} else {
-				logger.info(`no_repeat: ${seenCount} of ${urls.length} media already shown, ${unseen.length} remaining`);
-			}
-			return unseen;
 		}
 
 		async updateMediaList(callback = null, force = false, retryCount = 0) {
@@ -3004,17 +2999,41 @@ function initWallpanel() {
 			try {
 				let urls = await wp.findMedias(mediaContentId);
 				wp.totalMediaCount = urls.length;
-				urls = wp.filterUnseenMedia(urls);
-				if (config.media_order == "random") {
-					urls = shuffleArray(urls);
+				if (config.no_repeat) {
+					// Deterministic order (stable sort + seeded shuffle) so the persisted
+					// index stays valid across reloads. media_list_max_size is respected
+					// as a sliding window over the shuffled library: only the next
+					// max_size unshown items are kept in memory.
+					let state = wp.getNoRepeatState();
+					let all = seededShuffleArray(urls.sort(), state.seed);
+					wp.totalMediaCount = all.length;
+					if (state.index + 1 >= all.length) {
+						// Full pass complete: reshuffle with a new seed and start over
+						logger.info(`no_repeat: all ${all.length} media shown - starting a new pass`);
+						wp.noRepeatState = { seed: Math.floor(Math.random() * 4294967296), index: -1 };
+						wp.saveNoRepeatState();
+						state = wp.noRepeatState;
+						all = seededShuffleArray(urls.sort(), state.seed);
+					}
+					const windowStart = state.index + 1;
+					wp.noRepeatWindowStart = windowStart;
+					wp.mediaList = all.slice(windowStart, windowStart + config.media_list_max_size);
+					wp.mediaIndex = -1;
+					logger.info(
+						`no_repeat: showing items ${windowStart + 1}-${windowStart + wp.mediaList.length} of ${all.length}`
+					);
 				} else {
-					urls = urls.sort(); // Sort consistently if not random
+					if (config.media_order == "random") {
+						urls = shuffleArray(urls);
+					} else {
+						urls = urls.sort(); // Sort consistently if not random
+					}
+					if (urls.length > config.media_list_max_size) {
+						logger.info(`Using only ${config.media_list_max_size} of ${urls.length} media items`);
+						urls = urls.slice(0, config.media_list_max_size);
+					}
+					wp.mediaList = urls;
 				}
-				if (urls.length > config.media_list_max_size) {
-					logger.info(`Using only ${config.media_list_max_size} of ${urls.length} media items`);
-					urls = urls.slice(0, config.media_list_max_size);
-				}
-				wp.mediaList = urls;
 			} catch (error) {
 				// Error is logged in findMedias, re-throw for updateMediaList handler
 				throw new Error(`Failed to update image list from ${config.image_url}: ${error.message || stringify(error)}`);
@@ -3561,22 +3580,37 @@ function initWallpanel() {
 			} else {
 				mediaIndex--;
 			}
+			let windowExhausted = false;
 			if (mediaIndex >= this.mediaList.length) {
 				mediaIndex = 0;
+				windowExhausted = config.no_repeat && this.mediaListDirection == "forwards";
 			} else if (mediaIndex < 0) {
 				mediaIndex = this.mediaList.length - 1;
 			}
 			if (updateIndex) {
 				this.mediaIndex = mediaIndex;
 				if (config.no_repeat && this.mediaListDirection == "forwards") {
-					// Low-water mark: refresh the list in the background before the
-					// unshown pool runs dry, so selection never has to wait.
-					// The rebuilt list contains only unseen media (filterUnseenMedia).
-					const remaining = this.mediaList.length - 1 - mediaIndex;
 					const throttled = Date.now() - this.lastMediaListUpdate < 30000;
-					if (remaining < 10 && !throttled) {
-						logger.debug(`no_repeat: ${remaining} unshown items remaining, refreshing media list`);
-						this.updateMediaList(null, true);
+					if (windowExhausted) {
+						// Rebuild loads the next window (or starts a new pass); until it
+						// arrives, the current window replays from its start
+						if (!throttled) {
+							this.updateMediaList(null, true);
+						}
+					} else {
+						// Persist progress as a global index into the shuffled library
+						const state = this.getNoRepeatState();
+						state.index = (this.noRepeatWindowStart || 0) + mediaIndex;
+						this.saveNoRepeatState();
+						// Low-water mark: fetch the next window in the background
+						// before this one runs dry, so the slideshow never pauses
+						const remaining = this.mediaList.length - 1 - mediaIndex;
+						const libraryHasMore =
+							(this.noRepeatWindowStart || 0) + this.mediaList.length < (this.totalMediaCount || 0);
+						if (remaining < 10 && libraryHasMore && !throttled) {
+							logger.debug(`no_repeat: ${remaining} items left in window, refreshing media list`);
+							this.updateMediaList(null, true);
+						}
 					}
 				}
 			}
@@ -4086,7 +4120,6 @@ function initWallpanel() {
 		}
 
 		_switchActiveMedia(newElement, crossfadeMillis = null) {
-			this.markMediaSeen(newElement.originalMediaUrl || newElement.mediaUrl);
 			this.lastMediaUpdate = Date.now();
 			if (this.isPaused) {
 				// Case of calls to nextImage()/previousImage() when slideshow is paused.
@@ -4462,8 +4495,8 @@ function initWallpanel() {
 				}
 				html += `<b>Media list size:</b> ${this.mediaList.length}<br/>`;
 				if (config.no_repeat) {
-					const seen = this.seenMediaHashes ? this.seenMediaHashes.size : 0;
-					html += `<b>Media shown (no_repeat):</b> ${seen} of ${this.totalMediaCount || "?"}<br/>`;
+					const state = this.getNoRepeatState();
+					html += `<b>Media shown (no_repeat):</b> ${state.index + 1} of ${this.totalMediaCount || "?"}<br/>`;
 				}
 				const activeElement = this.getActiveMediaElement();
 				if (activeElement) {

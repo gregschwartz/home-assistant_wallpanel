@@ -71,7 +71,7 @@ You can set the following configuration parameters for every individual Home Ass
 | media_list_update_interval       | When using a local media source, the media list is updated at this interval.                           | 3600       |
 | media_list_max_size              | The maximum number of media items to fetch from the media source.                                      | 500        |
 | media_order                      | The order in which the images are displayed (possible values are: sorted / random).                    | random     |
-| no_repeat                        | Track shown media (hashed, in browser localStorage) and only show unseen media; once the entire library has been shown, tracking resets and coverage starts over. Media-source only. | false      |
+| no_repeat                        | Guarantee every image in the library is shown exactly once per pass: the library is deterministically shuffled and walked with a persisted position (two numbers in browser localStorage), surviving reloads and restarts. media_list_max_size is respected as a sliding window. Once the whole library has been shown, a new pass starts with a fresh shuffle. Media-source only. | false      |
 | skip_next_entity                 | An entity (e.g. input_datetime / input_text). Whenever its state changes, wallpanel skips to the next image. | ""     |
 | handle_image_errors              | Report media load failures to the media_index integration (media_index.mark_file_error).               | false      |
 | auto_exclude_errors              | Ask media_index to move files to its errors folder after error_threshold failures.                     | true       |
