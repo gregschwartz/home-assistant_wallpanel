@@ -120,7 +120,11 @@ const defaultConfig = {
 	handle_image_errors: false, // Call media_index.mark_file_error on load failures
 	auto_exclude_errors: true, // Auto-move files after error_threshold failures
 	error_threshold: 2, // Number of errors before media_index moves the file to its errors folder
-	skip_on_error: true // Immediately advance to the next image when media fails to load
+	skip_on_error: true, // Immediately advance to the next image when media fails to load
+	// No-repeat tracking: remember shown media (hashed, in localStorage) and only
+	// show unseen media until no_repeat_reset_percent of the library has been shown
+	no_repeat: false,
+	no_repeat_reset_percent: 90
 };
 const renamedConfigOptions = {
 	image_excludes: "exclude_filenames",
@@ -777,6 +781,20 @@ class CameraMotionDetection {
 			this._elementsAppended = false;
 		}
 	}
+}
+
+// cyrb53: fast 53-bit string hash, used to track seen media without storing full URLs
+function hashString53(str) {
+	let h1 = 0xdeadbeef;
+	let h2 = 0x41c6ce57;
+	for (let i = 0, ch; i < str.length; i++) {
+		ch = str.charCodeAt(i);
+		h1 = Math.imul(h1 ^ ch, 2654435761);
+		h2 = Math.imul(h2 ^ ch, 1597334677);
+	}
+	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+	return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 }
 
 function shuffleArray(array) {
@@ -2812,6 +2830,74 @@ function initWallpanel() {
 			});
 		}
 
+		seenMediaStorageKey() {
+			// Keyed by media source so different dashboards/sources track independently
+			return `wallpanel_seen_media_${hashString53(String(config.image_url))}`;
+		}
+
+		loadSeenMedia() {
+			this.seenMediaHashes = new Set();
+			try {
+				const raw = localStorage.getItem(this.seenMediaStorageKey());
+				if (raw) {
+					for (const h of JSON.parse(raw)) {
+						this.seenMediaHashes.add(h);
+					}
+				}
+			} catch (e) {
+				logger.warn("Failed to load seen media list:", e);
+			}
+		}
+
+		saveSeenMedia() {
+			try {
+				localStorage.setItem(this.seenMediaStorageKey(), JSON.stringify([...this.seenMediaHashes]));
+			} catch (e) {
+				logger.warn("Failed to save seen media list:", e);
+			}
+		}
+
+		resetSeenMedia() {
+			this.seenMediaHashes = new Set();
+			this.saveSeenMedia();
+		}
+
+		markMediaSeen(url) {
+			if (!config.no_repeat || !url) {
+				return;
+			}
+			if (!this.seenMediaHashes) {
+				this.loadSeenMedia();
+			}
+			const h = hashString53(url);
+			if (!this.seenMediaHashes.has(h)) {
+				this.seenMediaHashes.add(h);
+				this.saveSeenMedia();
+			}
+		}
+
+		filterUnseenMedia(urls) {
+			if (!config.no_repeat) {
+				return urls;
+			}
+			if (!this.seenMediaHashes) {
+				this.loadSeenMedia();
+			}
+			let unseen = urls.filter((u) => !this.seenMediaHashes.has(hashString53(u)));
+			const seenCount = urls.length - unseen.length;
+			const seenPercent = urls.length ? (seenCount / urls.length) * 100 : 0;
+			if (!unseen.length || seenPercent >= config.no_repeat_reset_percent) {
+				logger.info(
+					`no_repeat: ${seenCount} of ${urls.length} media shown (${Math.round(seenPercent)}%) - starting over`
+				);
+				this.resetSeenMedia();
+				unseen = urls;
+			} else {
+				logger.info(`no_repeat: ${seenCount} of ${urls.length} media already shown, ${unseen.length} remaining`);
+			}
+			return unseen;
+		}
+
 		async updateMediaList(callback = null, force = false, retryCount = 0) {
 			if (!config.image_url) return;
 			if (this.updatingMediaList) return;
@@ -2922,6 +3008,8 @@ function initWallpanel() {
 
 			try {
 				let urls = await wp.findMedias(mediaContentId);
+				wp.totalMediaCount = urls.length;
+				urls = wp.filterUnseenMedia(urls);
 				if (config.media_order == "random") {
 					urls = shuffleArray(urls);
 				} else {
@@ -3480,6 +3568,11 @@ function initWallpanel() {
 			}
 			if (mediaIndex >= this.mediaList.length) {
 				mediaIndex = 0;
+				if (config.no_repeat && updateIndex) {
+					// Current pool exhausted - refresh the list so the next cycle
+					// only contains media that has not been shown yet
+					this.updateMediaList(null, true);
+				}
 			} else if (mediaIndex < 0) {
 				mediaIndex = this.mediaList.length - 1;
 			}
@@ -3990,6 +4083,7 @@ function initWallpanel() {
 		}
 
 		_switchActiveMedia(newElement, crossfadeMillis = null) {
+			this.markMediaSeen(newElement.originalMediaUrl || newElement.mediaUrl);
 			this.lastMediaUpdate = Date.now();
 			if (this.isPaused) {
 				// Case of calls to nextImage()/previousImage() when slideshow is paused.
@@ -4364,6 +4458,10 @@ function initWallpanel() {
 					html += `<b>Screen wake lock video</b>: readyState=${p.readyState} currentTime=${p.currentTime} paused=${p.paused} ended=${p.ended}<br/>`;
 				}
 				html += `<b>Media list size:</b> ${this.mediaList.length}<br/>`;
+				if (config.no_repeat) {
+					const seen = this.seenMediaHashes ? this.seenMediaHashes.size : 0;
+					html += `<b>Media shown (no_repeat):</b> ${seen} of ${this.totalMediaCount || "?"}<br/>`;
+				}
 				const activeElement = this.getActiveMediaElement();
 				if (activeElement) {
 					html += `<b>Current media:</b> ${activeElement.mediaUrl}<br/>`;

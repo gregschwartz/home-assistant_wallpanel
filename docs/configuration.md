@@ -71,6 +71,13 @@ You can set the following configuration parameters for every individual Home Ass
 | media_list_update_interval       | When using a local media source, the media list is updated at this interval.                           | 3600       |
 | media_list_max_size              | The maximum number of media items to fetch from the media source.                                      | 500        |
 | media_order                      | The order in which the images are displayed (possible values are: sorted / random).                    | random     |
+| no_repeat                        | Track shown media (hashed, in browser localStorage) and only show unseen media until no_repeat_reset_percent of the library has been shown, then start over. Media-source only. | false      |
+| no_repeat_reset_percent          | Percentage of the library after which the no_repeat seen-list is reset.                                | 90         |
+| skip_on_error                    | Immediately advance to the next media when loading fails, instead of waiting for the next rotation. Broken media is never displayed either way. | true       |
+| skip_next_entity                 | An entity (e.g. input_datetime / input_text). Whenever its state changes, wallpanel skips to the next image. | ""     |
+| handle_image_errors              | Report media load failures to the media_index integration (media_index.mark_file_error).               | false      |
+| auto_exclude_errors              | Ask media_index to move files to its errors folder after error_threshold failures.                     | true       |
+| error_threshold                  | Number of failures before media_index moves the file.                                                  | 2          |
 | image_animation_ken_burns        | Apply a Ken Burns effect (panning and zooming) to the images?                                          | false      |
 | image_animation_ken_burns_zoom   | Zoom level for the Ken Burns effect.                                                                   | 1.3        |
 | image_animation_ken_burns_delay  | Start Ken Burns effect with a delay (in seconds).                                                      | 0          |
