@@ -120,7 +120,6 @@ const defaultConfig = {
 	handle_image_errors: false, // Call media_index.mark_file_error on load failures
 	auto_exclude_errors: true, // Auto-move files after error_threshold failures
 	error_threshold: 2, // Number of errors before media_index moves the file to its errors folder
-	skip_on_error: true, // Immediately advance to the next image when media fails to load
 	// No-repeat tracking: remember shown media (hashed, in localStorage) and only
 	// show unseen media until no_repeat_reset_percent of the library has been shown
 	no_repeat: false,
@@ -4068,13 +4067,15 @@ function initWallpanel() {
 				element.mediaLoadFailed = false;
 				this.consecutiveMediaErrors = (this.consecutiveMediaErrors || 0) + 1;
 				const maxErrorSkips = Math.min(this.mediaList.length || 10, 10);
-				if (config.skip_on_error && this.screensaverRunning() && this.consecutiveMediaErrors <= maxErrorSkips) {
+				if (this.screensaverRunning() && this.consecutiveMediaErrors <= maxErrorSkips) {
 					logger.warn(
 						`Media failed to load, skipping to next (attempt ${this.consecutiveMediaErrors}/${maxErrorSkips})`
 					);
 					setTimeout(() => this.switchActiveMedia("error_skip"), 100);
 				} else if (this.consecutiveMediaErrors > maxErrorSkips) {
-					logger.error("Too many consecutive media load failures, not skipping further");
+					// Rate limit: fall back to the normal display_time pace, which still
+					// advances through the list when many items fail in a row
+					logger.error("Too many consecutive media load failures, waiting for next rotation");
 				}
 				return;
 			}
