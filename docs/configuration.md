@@ -30,6 +30,7 @@ You can set the following configuration parameters for every individual Home Ass
 | keep_screen_on_time              | Time in seconds for how long to prevent screen to dimm or lock (0 = disabled).                         | 0         |
 | black_screen_after_time          | Time in seconds after which the screensaver will show just a black screen (0 = disabled).              | 0         |
 | control_reactivation_time        | Time in seconds for which interaction with the dashboard is disabled after the screensaver is stopped. | 1.0       |
+| close_more_info_dialog_time      | Automatically close more-info dialogs after the specified number of seconds (0 = disabled).            | 0         |
 | stop_screensaver_on_mouse_move   | Stop screensaver on mouse movement?                                                                    | true      |
 | stop_screensaver_on_mouse_click  | Stop screensaver on mouse click / display touch?                                                       | true      |
 | stop_screensaver_on_location_change | Stop screensaver on navigation (location-changed events)?                                           | true      |
@@ -40,6 +41,7 @@ You can set the following configuration parameters for every individual Home Ass
 | screensaver_start_navigation_path | Path to navigate to (e.g., /lovelace/default_view) when screensaver is started. Use a complete path to avoid redirects which will stop the screensaver. |           |
 | screensaver_stop_close_browser_mod_popup | Close the active browser mod popup when screensaver is stopped?                                | false     |
 | screensaver_entity               | An entity of type 'input_boolean' to reflect and change the screensaver state (on = started, off = stopped). If browser_mod is installed, `${browser_id}` will be replaced with Browser ID (see [Browser Mod](browser-mod.md#placeholder-browser_id)). |        |
+| disable_context_menu             | Disable context menu while screensaver is running?                                                     | false     |
 | show_images                      | Show images if screensaver is active?                                                                  | true      |
 | image_url                        | Fetch screensaver media files from this URL. See [Media Sources](media-sources.md) for details.        | See [Media Sources](media-sources.md) |
 | force_load_media_with_fetch      | Enforce media loading through `fetch()` instead of setting the elements `src` attribute.               | false     |
@@ -47,13 +49,16 @@ You can set the following configuration parameters for every individual Home Ass
 | media_entity_load_unchanged      | Should a new image be fetched from the entity after the display time has expired, even if the entity's state remains unchanged? | true      |
 | iframe_load_unchanged            | Should an iframe be reloaded once its display time has expired, even if its URL remains the same?      | false     |
 | iframe_interaction               | Allow interaction with the iframe content?                                                             | false     |
-| immich_api_key                   | API key that is used for authentication at the [immich API](media-sources.md#immich-api)               |           |
-| immich_shared_albums             | Show images of shared immich albums?                                                                   | true      |
-| immich_album_names               | Only show images from these immich albums.                                                             | []        |
-| immich_tag_names                 | Only show images with this tags.                                                                       | []        |
-| immich_persons                   | Only show images with this persons.                                                                    | []        |
-| immich_memories                  | Only show today memories.                                                                              | false     |
-| immich_resolution                | The resolution to use for loading images from immich (possible values are: `preview` / `original`).    | preview   |
+| immich_api_keys                  | API keys that are used for authentication at the [immich API](media-sources.md#immich-api)             | []        |
+| immich_api_request_timeout       | Timeout in seconds for immich API requests.                                                            | 15        |
+| immich_shared_albums             | Display media from shared Immich albums.                                                               | true      |
+| immich_album_names               | Display media only from the specified Immich albums.                                                   | []        |
+| immich_tag_names                 | Display media only with the specified tags.                                                            | []        |
+| immich_exclude_tag_names         | Exclude media with the specified tags.                                                                 | []        |
+| immich_persons                   | Display media only featuring the specified people.                                                     | []        |
+| immich_memories                  | Display only today’s memories.                                                                         | false     |
+| immich_favorites                 | Display only media marked as favorite.                                                                 | false     |
+| immich_resolution                | The resolution to use for loading media from immich (possible values are: `preview` / `original`).     | preview   |
 | exclude_filenames                | List of regular expressions for excluding files and directories from media sources. See [Media Sources](media-sources.md#exclude-files) for details. | []        |
 | exclude_media_types              | List of media types to exlcude media sources. See [Media Sources](media-sources.md#exclude-files) for details. | []        |
 | exclude_media_orientation        | Media orientation to exlcude. See [Media Sources](media-sources.md#exclude-files) for details.         |            |
@@ -61,17 +66,23 @@ You can set the following configuration parameters for every individual Home Ass
 | image_fit_portrait               | How to adjust a media item in portrait mode to fit the available space (cover or contain).             | contain    |
 | media_horizontal_align           | Determines how media items are aligned horizontally on the screen (left, center, or right).            | center     |
 | media_vertical_align             | Determines how media items are aligned vertically on the screen (top, middle, or bottom).              | middle     |
-| caclulate_media_size             | Calculate media container sizes.                                                                       | true       |
+| calculate_media_size             | Calculate media container sizes.                                                                       | true       |
 | image_background                 | Possible values are `color` and `image`. When set to `image`, a snapshot from the current media item is used as the background, covering the entire screen. To customize its appearance, apply styles using the `wallpanel-screensaver-image-background` class. | color |
 | media_list_update_interval       | When using a local media source, the media list is updated at this interval.                           | 3600       |
 | media_list_max_size              | The maximum number of media items to fetch from the media source.                                      | 500        |
-| media_order                      | The order in which the images are displayed (possible values are: sorted / random).                    | random     |
+| media_order                      | The order in which the images are displayed (possible values are: sorted / random / random_but_synced). With `random_but_synced` every device shows the same pseudo-random image at the same time (a shared, time-derived order) — handy for multiple wall displays.                    | random     |
+| no_repeat                        | Guarantee every image in the library is shown exactly once per pass: the library is deterministically shuffled and walked with a persisted position (two numbers in browser localStorage), surviving reloads and restarts. media_list_max_size is respected as a sliding window. Once the whole library has been shown, a new pass starts with a fresh shuffle. Media-source only. | false      |
+| skip_next_entity                 | An entity (e.g. input_datetime / input_text). Whenever its state changes, wallpanel skips to the next image. | ""     |
+| handle_image_errors              | Report media load failures to the media_index integration (media_index.mark_file_error).               | false      |
+| auto_exclude_errors              | Ask media_index to move files to its errors folder after error_threshold failures.                     | true       |
+| error_threshold                  | Number of failures before media_index moves the file.                                                  | 2          |
 | image_animation_ken_burns        | Apply a Ken Burns effect (panning and zooming) to the images?                                          | false      |
 | image_animation_ken_burns_zoom   | Zoom level for the Ken Burns effect.                                                                   | 1.3        |
 | image_animation_ken_burns_delay  | Start Ken Burns effect with a delay (in seconds).                                                      | 0          |
 | image_animation_ken_burns_duration | Specifies the duration of the Ken Burns effect in seconds. If set to 0, the `display_time` value is used instead. | 0          |
 | video_loop                       | Loop video until `display_time` is reached? Otherwise, immediately switch to the next media at the end of the video playback.  | false     |
 | video_volume                     | Volume of videos being played (0=0%, 1=100%).                                                          | 0.0        |
+| video_play_to_end                     | Play every Video until its end, no matter how long they are.                                                          | false        |
 | show_image_info                  | Show image info (EXIF / API) on top of image? Only available for local jpeg images containing EXIF data and images from the new Unsplash API. The config name was `show_exif_info` before version 4.7. | false      |
 | show_progress_bar                | Show animated progress bar towards next image being displayed?                                         | false      |
 | fetch_address_data               | Fetch address data for EXIF GPS coordinates from nominatim.openstreetmap.org?                          | false      |
@@ -85,6 +96,7 @@ You can set the following configuration parameters for every individual Home Ass
 | info_move_pattern                | Movement pattern of the info box at a specified interval (possible values are: random / corners).      | random     |
 | info_move_interval               | Interval of movement of the info box in seconds (0 = no movement).                                     | 0          |
 | info_move_fade_duration          | Duration of the fade-in and fade-out animation of the info box in case of movement (0 = no animation). | 2.0        |
+| theme                            | Specifies the Home Assistant theme to apply to the info box. Defaults to the theme defined in the user profile. |            |
 | style                            | Additional CSS styles for WallPanel elements.                                                          | {}         |
 | badges                           | Badges to display in info box. Set to [] to show no badges at all. See [Badges](info-box.md#badges) for details.  | []         |
 | cards                            | Cards to display in info box. Set to [] to show no cards at all. See [Cards](info-box.md#cards) for details.      | []         |
@@ -94,8 +106,12 @@ You can set the following configuration parameters for every individual Home Ass
 | profile                          | Configuration profile to activate. If browser_mod is installed, `${browser_id}` will be replaced with Browser ID (see [Browser Mod](browser-mod.md#placeholder-browser_id)). |            |
 | profile_entity                   | An entity of type 'input_text' used for dynamic activation of profiles. If browser_mod is installed, `${browser_id}` will be replaced with Browser ID (see [Browser Mod](browser-mod.md#placeholder-browser_id)). |            |
 | camera_motion_detection_enabled          | Activate camera based motion detection? Screensaver is stopped when movement is detected See [Camera motion detection](camera-motion-detection.md) for details. | false      |
+| camera_motion_detection_stop_screensaver | Stop screensaver when motion is detected?                                                      | true       |
+| camera_motion_detection_set_entity       | An entity of type 'input_boolean' to update with the motion detection state (on = motion detected, off = no motion detected). | | 
 | camera_motion_detection_facing_mode      | Which camera to use (user / environment / left / right).                                       | user       |
 | camera_motion_detection_threshold        | If this many percent of the pixels change between two images, this is counted as movement.     | 5          |
+| camera_motion_detection_motion_start_delay | The time interval, in seconds, during which motion must be detected before the "motion detected" status is set. | 0.0     |
+| camera_motion_detection_motion_stop_delay | The time in seconds to wait after motion stops before resetting the status to "no motion detected". | 2.0     |
 | camera_motion_detection_capture_width    | Width of the images captured by the camera in pixels.                                          | 64         |
 | camera_motion_detection_capture_height   | Height of the images captured by the camera in pixels.                                         | 48         |
 | camera_motion_detection_capture_interval | Interval in seconds at which images are captured by the camera.                                | 0.3        |
