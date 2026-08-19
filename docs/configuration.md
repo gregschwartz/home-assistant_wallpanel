@@ -70,7 +70,7 @@ You can set the following configuration parameters for every individual Home Ass
 | image_background                 | Possible values are `color` and `image`. When set to `image`, a snapshot from the current media item is used as the background, covering the entire screen. To customize its appearance, apply styles using the `wallpanel-screensaver-image-background` class. | color |
 | media_list_update_interval       | When using a local media source, the media list is updated at this interval.                           | 3600       |
 | media_list_max_size              | The maximum number of media items to fetch from the media source.                                      | 500        |
-| media_order                      | The order in which the images are displayed (possible values are: sorted / random).                    | random     |
+| media_order                      | The order in which the images are displayed (possible values are: sorted / random / random_but_synced). With `random_but_synced` every device shows the same pseudo-random image at the same time (a shared, time-derived order) — handy for multiple wall displays.                    | random     |
 | no_repeat                        | Guarantee every image in the library is shown exactly once per pass: the library is deterministically shuffled and walked with a persisted position (two numbers in browser localStorage), surviving reloads and restarts. media_list_max_size is respected as a sliding window. Once the whole library has been shown, a new pass starts with a fresh shuffle. Media-source only. | false      |
 | skip_next_entity                 | An entity (e.g. input_datetime / input_text). Whenever its state changes, wallpanel skips to the next image. | ""     |
 | handle_image_errors              | Report media load failures to the media_index integration (media_index.mark_file_error).               | false      |
@@ -82,6 +82,7 @@ You can set the following configuration parameters for every individual Home Ass
 | image_animation_ken_burns_duration | Specifies the duration of the Ken Burns effect in seconds. If set to 0, the `display_time` value is used instead. | 0          |
 | video_loop                       | Loop video until `display_time` is reached? Otherwise, immediately switch to the next media at the end of the video playback.  | false     |
 | video_volume                     | Volume of videos being played (0=0%, 1=100%).                                                          | 0.0        |
+| video_play_to_end                     | Play every Video until its end, no matter how long they are.                                                          | false        |
 | show_image_info                  | Show image info (EXIF / API) on top of image? Only available for local jpeg images containing EXIF data and images from the new Unsplash API. The config name was `show_exif_info` before version 4.7. | false      |
 | show_progress_bar                | Show animated progress bar towards next image being displayed?                                         | false      |
 | fetch_address_data               | Fetch address data for EXIF GPS coordinates from nominatim.openstreetmap.org?                          | false      |
